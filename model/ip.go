@@ -2,7 +2,9 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/netip"
+	"strings"
 )
 
 // IPAddr represents a single IP address
@@ -51,6 +53,11 @@ func (a *IPAddr) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &s)
 	if err != nil {
 		return err
+	}
+
+	if s == "" {
+		a = nil
+		return nil
 	}
 
 	*a, err = ParseIPAddr(s)
@@ -106,5 +113,89 @@ func (p *IPPrefix) UnmarshalJSON(data []byte) error {
 	}
 
 	*p, err = ParsePrefix(s)
+	return err
+}
+
+// Gateway represents a route gateway
+//
+// Examples:
+// `10.10.10.1`
+// `10.10.10.1%ether1`
+// `ether1`
+type Gateway struct {
+	addr          *IPAddr
+	interfaceName *string
+}
+
+// ParseGateway parses a route gateway from a string
+// Example valid strings: `10.10.10.1`, `10.10.10.1%ether1`, `ether1`
+func ParseGateway(s string) (Gateway, error) {
+	// try to parse as IP
+	addr, err := ParseIPAddr(s)
+	if err != nil {
+		separated := strings.Split(s, "%")
+		// only interface name case
+		if len(separated) < 2 {
+			return Gateway{interfaceName: &s}, nil
+		}
+
+		// try to parse first part as IP
+		addr, err = ParseIPAddr(separated[0])
+		if err != nil {
+			return Gateway{}, err
+		}
+
+		// both IP address and interface name case
+		return Gateway{addr: &addr, interfaceName: &separated[1]}, nil
+	}
+
+	// only IP address case
+	return Gateway{addr: &addr}, nil
+}
+
+// MustParseGateway parses a route gateway from a string
+// Example valid strings: `10.10.10.1`, `10.10.10.1%ether1`, `ether1`
+// It panics on error
+func MustParseGateway(s string) Gateway {
+	gateway, err := ParseGateway(s)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return gateway
+}
+
+// String returns a route gateway as a string
+// Example valid strings: `10.10.10.1`, `10.10.10.1%ether1`, `ether1`
+func (g Gateway) String() string {
+	switch {
+	// IP address
+	case g.addr != nil && g.interfaceName == nil:
+		return g.addr.String()
+	// interface name
+	case g.interfaceName != nil && g.addr == nil:
+		return *g.interfaceName
+	// both IP address and interface name
+	default:
+		return fmt.Sprintf("%s%%%s", g.addr.String(), *g.interfaceName)
+	}
+}
+
+// MarshalJSON encodes a route gateway as a JSON string
+// Example valid JSON strings: "10.10.10.1", "10.10.10.1%ether1", "ether1"
+func (g Gateway) MarshalJSON() ([]byte, error) {
+	return json.Marshal(g.String())
+}
+
+// UnmarshalJSON decodes a route gateway from a JSON string
+// Example valid JSON strings: "10.10.10.1", "10.10.10.1%ether1", "ether1"
+func (g *Gateway) UnmarshalJSON(data []byte) error {
+	var s string
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return err
+	}
+
+	*g, err = ParseGateway(s)
 	return err
 }
